@@ -1,0 +1,25 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+
+entity Smart_Thermostat is
+Port(
+    Temp: in STD_LOGIC;
+    Mode: in STD_LOGIC;
+    Fan: out STD_LOGIC
+);
+
+architecture sample_thermostat of Smart_Thermostat is
+begin
+
+    process(Temp, Mode, Fan)
+    begin
+        if(Temp and Mode) then
+            Fan <= Temp and Mode;
+        else
+            Fan <= Temp and Mode;
+        end if;
+    end process;
+end sample_thermostat;
+
+
+
