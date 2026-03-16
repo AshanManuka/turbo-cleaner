@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Saved Submissions — TurboGlow Cleaning</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: #f4f6fb;
+    }
+
+    h1 {
+      margin: 0 0 1rem;
+      color: #001f54;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      align-items: center;
+    }
+
+    button {
+      padding: 0.6rem 1rem;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button.primary {
+      background: #001f54;
+      color: white;
+    }
+
+    button.secondary {
+      background: #e0e0e0;
+      color: #111;
+    }
+
+    a.back {
+      color: #001f54;
+      text-decoration: none;
+      margin-left: auto;
+    }
+
+    a.back:hover {
+      text-decoration: underline;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      vertical-align: top;
+    }
+
+    thead {
+      background: #001f54;
+      color: white;
+    }
+
+    tbody tr:hover {
+      background: rgba(0, 31, 84, 0.05);
+    }
+
+    .empty {
+      padding: 3rem;
+      text-align: center;
+      color: #555;
+    }
+
+    .note {
+      font-size: 0.9rem;
+      color: #555;
+      margin-top: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Saved Quote Requests</h1>
+  <div class="toolbar">
+    <button class="primary" id="refreshBtn">Refresh</button>
+    <button class="secondary" id="clearBtn">Clear all</button>
+    <a class="back" href="/">← Back to site</a>
+  </div>
+  <div class="note">This page is not protected; keep the link private.</div>
+  <div id="output"></div>
+
+  <script>
+    const output = document.getElementById('output');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    async function loadSubmissions() {
+      output.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const res = await fetch('/api/submissions');
+        const data = await res.json();
+
+        if (!Array.isArray(data) || data.length === 0) {
+          output.innerHTML = '<div class="empty">No submissions yet.</div>';
+          return;
+        }
+
+        const rows = data
+          .map((item) => {
+            const receivedAt = item.receivedAt || '';
+            const name = item.name || '';
+            const phone = item.phone || '';
+            const email = item.email || '';
+            const service = item.service || '';
+            const address = item.address || '';
+            const details = item.details || '';
+            const ip = item.ip || '';
+
+            return `
+              <tr>
+                <td>${receivedAt}</td>
+                <td>${name}</td>
+                <td>${phone}</td>
+                <td>${email}</td>
+                <td>${service}</td>
+                <td>${address}</td>
+                <td>${details}</td>
+                <td>${ip}</td>
+              </tr>
+            `;
+          })
+          .join('');
+
+        output.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Received</th>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Service</th>
+                <th>Address</th>
+                <th>Details</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        `;
+      } catch (error) {
+        output.innerHTML = `<div class="empty">Unable to load submissions.<br>${error.message}</div>`;
+      }
+    }
+
+    async function clearAll() {
+      if (!confirm('Clear all saved submissions? This cannot be undone.')) return;
+      try {
+        const res = await fetch('/api/submissions', { method: 'DELETE' });
+        if (res.ok) {
+          loadSubmissions();
+        } else {
+          throw new Error('Failed to clear');
+        }
+      } catch (err) {
+        alert('Failed to clear submissions.');
+      }
+    }
+
+    refreshBtn.addEventListener('click', loadSubmissions);
+    clearBtn.addEventListener('click', clearAll);
+
+    loadSubmissions();
+  </script>
+</body>
+</html>

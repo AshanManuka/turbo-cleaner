@@ -1,0 +1,62 @@
+[
+  {
+    "receivedAt": "2026-03-16T07:49:36.452Z",
+    "ip": "::1",
+    "name": "Ashan Manuka",
+    "phone": "0705143335",
+    "email": "ashan@ewbholdings.com",
+    "service": "One-Off Deep Clean",
+    "address": "no23, katubedda, moratuwa",
+    "details": "sample message"
+  },
+  {
+    "receivedAt": "2026-03-16T07:47:23.512Z",
+    "ip": "::1",
+    "name": "Ashan Manuka",
+    "phone": "0705143335",
+    "email": "ashan@ewbholdings.com",
+    "service": "Carpet Cleaning",
+    "address": "no23, katubedda, moratuwa",
+    "details": "sdfghj"
+  },
+  {
+    "receivedAt": "2026-03-16T07:46:32.104Z",
+    "ip": "::1",
+    "name": "Ashan Manuka",
+    "phone": "0705143335",
+    "email": "ashan@ewbholdings.com",
+    "service": "Regular Turnover",
+    "address": "no23, katubedda, moratuwa",
+    "details": "sample message"
+  },
+  {
+    "receivedAt": "2026-03-16T07:43:21.719Z",
+    "ip": "::ffff:127.0.0.1",
+    "name": "Ashan Manuka",
+    "phone": "0705143335",
+    "email": "ashan@ewbholdings.com",
+    "service": "One-Off Deep Clean",
+    "address": "no23, katubedda, moratuwa",
+    "details": "sample sample sample"
+  },
+  {
+    "receivedAt": "2026-03-16T07:38:49.475Z",
+    "ip": "::1",
+    "name": "Ashan Manuka",
+    "phone": "0705143335",
+    "email": "ashan@ewbholdings.com",
+    "service": "Vacate Cleaning",
+    "address": "no23, katubedda, moratuwa",
+    "details": "sample message"
+  },
+  {
+    "receivedAt": "2026-03-16T07:23:09.564Z",
+    "ip": "::1",
+    "name": "Ashan Manuka",
+    "phone": "0705143335",
+    "email": "ashan@ewbholdings.com",
+    "service": "Regular Turnover",
+    "address": "no23, katubedda, moratuwa",
+    "details": "sample description"
+  }
+]
