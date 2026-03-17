@@ -23,7 +23,7 @@ const DATA_FILE = path.join(PUBLIC_DIR, 'submissions.json');
 // Email config (replace with your Gmail + app password)
 const EMAIL_USER = process.env.EMAIL_USER || 'manukajayarathne.coma@gmail.com';
 const EMAIL_PASS = process.env.EMAIL_PASS || 'jyut gwwb mdqo rwlp';
-const BUSINESS_EMAIL = 'ashanmanukajayarathna@gmail.com'; // Your business email
+const BUSINESS_EMAIL = 'peshala46@gmail.com'; // Your business email
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
