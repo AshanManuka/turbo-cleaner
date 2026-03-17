@@ -26,12 +26,25 @@ const EMAIL_USER = process.env.EMAIL_USER || 'manukajayarathne.coma@gmail.com';
 const EMAIL_PASS = process.env.EMAIL_PASS || 'jyut gwwb mdqo rwlp';
 const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || 'peshala46@gmail.com';
 
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_SECURE = SMTP_PORT === 465;
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_SECURE,
+  requireTLS: !SMTP_SECURE,
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
+  connectionTimeout: 15_000,
+  greetingTimeout: 15_000,
+  socketTimeout: 20_000,
+  // Production error shows Gmail resolving to IPv6 and failing (ENETUNREACH);
+  // force IPv4 for the SMTP socket.
+  family: 4,
 });
 
 transporter
