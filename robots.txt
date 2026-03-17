@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /submissions.html
+Disallow: /submissions.json
+
+Sitemap: https://turboglowcleaning.com.au/sitemap.xml

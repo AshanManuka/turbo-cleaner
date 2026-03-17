@@ -20,10 +20,11 @@ const PORT = process.env.PORT || 3001;
 const PUBLIC_DIR = path.resolve(__dirname);
 const DATA_FILE = path.join(PUBLIC_DIR, 'submissions.json');
 
-// Email config (replace with your Gmail + app password)
+// Email config
+// Hardcoded defaults (can be overridden via environment variables).
 const EMAIL_USER = process.env.EMAIL_USER || 'manukajayarathne.coma@gmail.com';
 const EMAIL_PASS = process.env.EMAIL_PASS || 'jyut gwwb mdqo rwlp';
-const BUSINESS_EMAIL = 'peshala46@gmail.com'; // Your business email
+const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || 'peshala46@gmail.com';
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -32,6 +33,11 @@ const transporter = nodemailer.createTransport({
     pass: EMAIL_PASS,
   },
 });
+
+transporter
+  .verify()
+  .then(() => console.log('Email transporter verified.'))
+  .catch((err) => console.error('Email transporter verify failed:', err));
 
 function safeJoin(base, target) {
   const targetPath = '.' + path.normalize('/' + target);
@@ -45,6 +51,7 @@ function getMimeType(filePath) {
     '.css': 'text/css',
     '.js': 'application/javascript',
     '.json': 'application/json',
+    '.xml': 'application/xml; charset=utf-8',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
@@ -98,25 +105,34 @@ async function sendEmail(to, subject, html) {
 }
 
 function sendJSON(res, code, data) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(code, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex, nofollow, noarchive',
+  });
   res.end(JSON.stringify(data));
 }
 
-function sendFile(res, filePath) {
+function sendFile(res, filePath, extraHeaders = {}) {
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow, noarchive',
+      });
       res.end('404: Not found');
       return;
     }
 
-    res.writeHead(200, { 'Content-Type': getMimeType(filePath) });
+    res.writeHead(200, { 'Content-Type': getMimeType(filePath), ...extraHeaders });
     res.end(data);
   });
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  const noIndexHeader = { 'X-Robots-Tag': 'noindex, nofollow, noarchive' };
 
   if (url.pathname === '/api/quote' && req.method === 'POST') {
     try {
@@ -176,19 +192,37 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Serve static files
+  if (url.pathname === '/index.html') {
+    res.writeHead(301, { Location: '/' });
+    res.end();
+    return;
+  }
+
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   filePath = safeJoin(PUBLIC_DIR, filePath);
 
   if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.writeHead(403, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    });
     res.end('403: Forbidden');
     return;
   }
 
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    sendFile(res, filePath);
+    const isNoIndex =
+      url.pathname === '/submissions.html' ||
+      url.pathname === '/submissions.json' ||
+      url.pathname.startsWith('/api/');
+    sendFile(res, filePath, isNoIndex ? noIndexHeader : {});
   } else {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.writeHead(404, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    });
     res.end('404: Not found');
   }
 });

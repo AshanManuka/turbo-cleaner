@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-AU">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Saved Submissions — TurboGlow Cleaning</title>
+  <title>Saved Submissions &mdash; TurboGlow Cleaning</title>
+  <meta name="robots" content="noindex,nofollow,noarchive" />
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -97,7 +98,7 @@
   <div class="toolbar">
     <button class="primary" id="refreshBtn">Refresh</button>
     <button class="secondary" id="clearBtn">Clear all</button>
-    <a class="back" href="/">← Back to site</a>
+    <a class="back" href="/">&larr; Back to site</a>
   </div>
   <div class="note">This page is not protected; keep the link private.</div>
   <div id="output"></div>
@@ -108,7 +109,7 @@
     const clearBtn = document.getElementById('clearBtn');
 
     async function loadSubmissions() {
-      output.innerHTML = '<div class="empty">Loading…</div>';
+      output.innerHTML = '<div class="empty">Loading...</div>';
       try {
         const res = await fetch('/api/submissions');
         const data = await res.json();
