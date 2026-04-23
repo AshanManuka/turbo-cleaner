@@ -36,10 +36,12 @@ function createTransporter() {
     host,
     port,
     secure,
+    requireTLS: !secure,
     auth: { user, pass },
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
     socketTimeout: 20_000,
+    family: 4,
   });
 }
 
@@ -63,4 +65,3 @@ module.exports = {
   getTransporter,
   verifyTransporter,
 };
-

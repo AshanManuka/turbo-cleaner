@@ -120,7 +120,18 @@ function sendFile(res, filePath, extraHeaders = {}) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  let url;
+  try {
+    url = new URL(req.url, 'http://localhost');
+  } catch (err) {
+    res.writeHead(400, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    });
+    res.end('400: Bad request');
+    return;
+  }
   const noIndexHeader = { 'X-Robots-Tag': 'noindex, nofollow, noarchive' };
 
   if (url.pathname === '/api/quote' && req.method === 'POST') {
