@@ -11,46 +11,22 @@
     http://<droplet-ip>:3000/          (landing page)
 */
 
+require('dotenv').config();
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const nodemailer = require('nodemailer');
+const { getTransporter, verifyTransporter } = require('./transporter');
 
 const PORT = process.env.PORT || 3001;
 const PUBLIC_DIR = path.resolve(__dirname);
 const DATA_FILE = path.join(PUBLIC_DIR, 'submissions.json');
 
 // Email config
-// Hardcoded defaults (can be overridden via environment variables).
-const EMAIL_USER = process.env.EMAIL_USER || 'manukajayarathne.coma@gmail.com';
-const EMAIL_PASS = process.env.EMAIL_PASS || 'jyut gwwb mdqo rwlp';
-const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || 'peshala46@gmail.com';
+const BUSINESS_EMAIL = 'hello@turboglowcleaning.com.au';
+const DEFAULT_FROM = `TurboGlow Cleaning <${BUSINESS_EMAIL}>`;
 
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
-const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-const SMTP_SECURE = SMTP_PORT === 465;
-
-const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
-  secure: SMTP_SECURE,
-  requireTLS: !SMTP_SECURE,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
-  },
-  connectionTimeout: 15_000,
-  greetingTimeout: 15_000,
-  socketTimeout: 20_000,
-  // Production error shows Gmail resolving to IPv6 and failing (ENETUNREACH);
-  // force IPv4 for the SMTP socket.
-  family: 4,
-});
-
-transporter
-  .verify()
-  .then(() => console.log('Email transporter verified.'))
-  .catch((err) => console.error('Email transporter verify failed:', err));
+verifyTransporter();
 
 function safeJoin(base, target) {
   const targetPath = '.' + path.normalize('/' + target);
@@ -105,8 +81,8 @@ function writeSubmissions(list) {
 
 async function sendEmail(to, subject, html) {
   try {
-    await transporter.sendMail({
-      from: EMAIL_USER,
+    await getTransporter().sendMail({
+      from: DEFAULT_FROM,
       to,
       subject,
       html,
