@@ -1,6 +1,6 @@
 const { getTransporter } = require('./transporter');
 
-const BUSINESS_EMAIL = 'hello@turboglowcleaning.com.au';
+const BUSINESS_EMAIL = 'info@turboglowcleaning.com.au';
 const FROM = `TurboGlow Cleaning <${BUSINESS_EMAIL}>`;
 const SUBJECT = 'New Contact Form Submission';
 

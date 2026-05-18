@@ -80,6 +80,40 @@
       background: rgba(0, 31, 84, 0.05);
     }
 
+    tbody tr.unread {
+      font-weight: bold;
+      background: rgba(0, 31, 84, 0.02);
+    }
+
+    .status-badge {
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+    }
+
+    .status-unread {
+      background: #ffd700;
+      color: #333;
+    }
+
+    .status-read {
+      background: #4caf50;
+      color: white;
+    }
+
+    button.toggle-btn {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.8rem;
+      background: #eee;
+      color: #333;
+      border: 1px solid #ccc;
+    }
+
+    button.toggle-btn:hover {
+      background: #ddd;
+    }
+
     .empty {
       padding: 3rem;
       text-align: center;
@@ -98,20 +132,43 @@
   <div class="toolbar">
     <button class="primary" id="refreshBtn">Refresh</button>
     <button class="secondary" id="clearBtn">Clear all</button>
+    <button class="secondary" id="logoutBtn">Logout</button>
     <a class="back" href="/">&larr; Back to site</a>
   </div>
-  <div class="note">This page is not protected; keep the link private.</div>
   <div id="output"></div>
 
   <script>
     const output = document.getElementById('output');
     const refreshBtn = document.getElementById('refreshBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    async function toggleStatus(id) {
+      try {
+        const res = await fetch('/api/submissions/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (res.ok) {
+          loadSubmissions();
+        } else {
+          const data = await res.json();
+          alert('Error: ' + data.error);
+        }
+      } catch (err) {
+        alert('Failed to toggle status.');
+      }
+    }
 
     async function loadSubmissions() {
       output.innerHTML = '<div class="empty">Loading...</div>';
       try {
         const res = await fetch('/api/submissions');
+        if (res.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
         const data = await res.json();
 
         if (!Array.isArray(data) || data.length === 0) {
@@ -128,18 +185,26 @@
             const service = item.service || '';
             const address = item.address || '';
             const details = item.details || '';
-            const ip = item.ip || '';
+            const status = item.status || 'unread';
+            const id = item.id;
 
             return `
-              <tr>
-                <td>${receivedAt}</td>
+              <tr class="${status}">
+                <td>${new Date(receivedAt).toLocaleString()}</td>
+                <td>
+                  <span class="status-badge status-${status}">${status}</span>
+                </td>
                 <td>${name}</td>
                 <td>${phone}</td>
                 <td>${email}</td>
                 <td>${service}</td>
                 <td>${address}</td>
                 <td>${details}</td>
-                <td>${ip}</td>
+                <td>
+                  <button class="toggle-btn" onclick="toggleStatus('${id}')">
+                    Mark as ${status === 'read' ? 'Unread' : 'Read'}
+                  </button>
+                </td>
               </tr>
             `;
           })
@@ -150,13 +215,14 @@
             <thead>
               <tr>
                 <th>Received</th>
+                <th>Status</th>
                 <th>Name</th>
                 <th>Phone</th>
                 <th>Email</th>
                 <th>Service</th>
                 <th>Address</th>
                 <th>Details</th>
-                <th>IP</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -185,6 +251,10 @@
 
     refreshBtn.addEventListener('click', loadSubmissions);
     clearBtn.addEventListener('click', clearAll);
+    logoutBtn.addEventListener('click', () => {
+      document.cookie = 'admin_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+      window.location.href = '/login.html';
+    });
 
     loadSubmissions();
   </script>

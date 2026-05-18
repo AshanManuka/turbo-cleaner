@@ -21,9 +21,10 @@ const { getTransporter, verifyTransporter } = require('./transporter');
 const PORT = process.env.PORT || 3001;
 const PUBLIC_DIR = path.resolve(__dirname);
 const DATA_FILE = path.join(PUBLIC_DIR, 'submissions.json');
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Pesh@18SriLanka';
 
 // Email config
-const BUSINESS_EMAIL = 'hello@turboglowcleaning.com.au';
+const BUSINESS_EMAIL = 'info@turboglowcleaning.com.au';
 const DEFAULT_FROM = `TurboGlow Cleaning <${BUSINESS_EMAIL}>`;
 
 verifyTransporter();
@@ -62,6 +63,23 @@ function readBody(req) {
   });
 }
 
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers.cookie;
+  if (rc) {
+    rc.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      list[parts.shift().trim()] = decodeURI(parts.join('='));
+    });
+  }
+  return list;
+}
+
+function isAuthenticated(req) {
+  const cookies = parseCookies(req);
+  return cookies.admin_session === ADMIN_PASSWORD;
+}
+
 function readSubmissions() {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
@@ -76,20 +94,6 @@ function writeSubmissions(list) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(list, null, 2), 'utf8');
   } catch (err) {
     console.error('Failed to write submissions', err);
-  }
-}
-
-async function sendEmail(to, subject, html) {
-  try {
-    await getTransporter().sendMail({
-      from: DEFAULT_FROM,
-      to,
-      subject,
-      html,
-    });
-    console.log(`Email sent to ${to}`);
-  } catch (err) {
-    console.error('Email send failed:', err);
   }
 }
 
@@ -134,43 +138,22 @@ const server = http.createServer(async (req, res) => {
   }
   const noIndexHeader = { 'X-Robots-Tag': 'noindex, nofollow, noarchive' };
 
+  // Public API
   if (url.pathname === '/api/quote' && req.method === 'POST') {
     try {
       const bodyRaw = await readBody(req);
       const payload = JSON.parse(bodyRaw || '{}');
 
       const submissions = readSubmissions();
-      submissions.unshift({
+      const newSubmission = {
+        id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9),
         receivedAt: new Date().toISOString(),
         ip: req.socket.remoteAddress,
+        status: 'unread',
         ...payload,
-      });
+      };
+      submissions.unshift(newSubmission);
       writeSubmissions(submissions);
-
-      // Send email to business
-      const businessHtml = `
-        <h2>New Quote Request</h2>
-        <p><strong>Name:</strong> ${payload.name || 'N/A'}</p>
-        <p><strong>Phone:</strong> ${payload.phone || 'N/A'}</p>
-        <p><strong>Email:</strong> ${payload.email || 'N/A'}</p>
-        <p><strong>Service:</strong> ${payload.service || 'N/A'}</p>
-        <p><strong>Address:</strong> ${payload.address || 'N/A'}</p>
-        <p><strong>Details:</strong> ${payload.details || 'N/A'}</p>
-        <p><strong>Received:</strong> ${new Date().toLocaleString()}</p>
-      `;
-      sendEmail(BUSINESS_EMAIL, 'New Quote Request - TurboGlow Cleaning', businessHtml);
-
-      // Send confirmation to client if email provided
-      if (payload.email) {
-        const clientHtml = `
-          <h2>Thank you for your quote request!</h2>
-          <p>Hi ${payload.name},</p>
-          <p>We've received your request for: <strong>${payload.service}</strong></p>
-          <p>We'll contact you soon at ${payload.phone}.</p>
-          <p>Best,<br>TurboGlow Cleaning Team</p>
-        `;
-        sendEmail(payload.email, 'Quote Request Received - TurboGlow Cleaning', clientHtml);
-      }
 
       sendJSON(res, 200, { success: true });
     } catch (err) {
@@ -179,16 +162,63 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === '/api/submissions' && req.method === 'GET') {
-    const submissions = readSubmissions();
-    sendJSON(res, 200, submissions);
+  // Auth API
+  if (url.pathname === '/api/login' && req.method === 'POST') {
+    try {
+      const bodyRaw = await readBody(req);
+      const payload = JSON.parse(bodyRaw || '{}');
+      if (payload.password === ADMIN_PASSWORD) {
+        res.writeHead(200, {
+          'Set-Cookie': `admin_session=${ADMIN_PASSWORD}; Path=/; HttpOnly; Max-Age=2592000`,
+          'Content-Type': 'application/json',
+        });
+        res.end(JSON.stringify({ success: true }));
+      } else {
+        sendJSON(res, 401, { success: false, error: 'Invalid password' });
+      }
+    } catch (err) {
+      sendJSON(res, 500, { success: false, error: String(err) });
+    }
     return;
   }
 
-  if (url.pathname === '/api/submissions' && req.method === 'DELETE') {
-    writeSubmissions([]);
-    sendJSON(res, 200, { success: true });
-    return;
+  // Protected APIs
+  if (url.pathname.startsWith('/api/submissions')) {
+    if (!isAuthenticated(req)) {
+      sendJSON(res, 401, { success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (url.pathname === '/api/submissions' && req.method === 'GET') {
+      const submissions = readSubmissions();
+      sendJSON(res, 200, submissions);
+      return;
+    }
+
+    if (url.pathname === '/api/submissions/toggle' && req.method === 'POST') {
+      try {
+        const bodyRaw = await readBody(req);
+        const { id } = JSON.parse(bodyRaw || '{}');
+        const submissions = readSubmissions();
+        const index = submissions.findIndex((s) => s.id === id);
+        if (index !== -1) {
+          submissions[index].status = submissions[index].status === 'read' ? 'unread' : 'read';
+          writeSubmissions(submissions);
+          sendJSON(res, 200, { success: true, status: submissions[index].status });
+        } else {
+          sendJSON(res, 404, { success: false, error: 'Not found' });
+        }
+      } catch (err) {
+        sendJSON(res, 500, { success: false, error: String(err) });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/submissions' && req.method === 'DELETE') {
+      writeSubmissions([]);
+      sendJSON(res, 200, { success: true });
+      return;
+    }
   }
 
   // Serve static files
@@ -216,6 +246,14 @@ const server = http.createServer(async (req, res) => {
       url.pathname === '/submissions.html' ||
       url.pathname === '/submissions.json' ||
       url.pathname.startsWith('/api/');
+    
+    // Redirect to login if trying to access submissions.html and not authenticated
+    if (url.pathname === '/submissions.html' && !isAuthenticated(req)) {
+      res.writeHead(302, { Location: '/login.html' });
+      res.end();
+      return;
+    }
+
     sendFile(res, filePath, isNoIndex ? noIndexHeader : {});
   } else {
     res.writeHead(404, {
@@ -226,6 +264,7 @@ const server = http.createServer(async (req, res) => {
     res.end('404: Not found');
   }
 });
+
 
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
