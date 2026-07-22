@@ -1,271 +1,246 @@
-/*
-  Simple Node.js HTTP server that:
-  - serves static files from this folder
-  - saves form submissions to submissions.json
-  - sends email notifications on form submit
-
-  Run:
-    node server.js
-
-  Visit:
-    http://<droplet-ip>:3000/          (landing page)
-*/
-
 require('dotenv').config();
 
+const crypto = require('crypto');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { getTransporter, verifyTransporter } = require('./transporter');
+const { pool, initializeDatabase } = require('./src/database');
+const { verifyPassword, createSession, authenticate, revokeSession } = require('./src/auth');
+const { allPaths, renderSeoPage } = require('./src/seoPages');
+const seoPathSet = new Set(allPaths);
 
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 const PUBLIC_DIR = path.resolve(__dirname);
-const DATA_FILE = path.join(PUBLIC_DIR, 'submissions.json');
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Pesh@18SriLanka';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const MAX_BODY_BYTES = 20 * 1024;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+const loginAttempts = new Map();
 
-// Email config
-const BUSINESS_EMAIL = 'info@turboglowcleaning.com.au';
-const DEFAULT_FROM = `TurboGlow Cleaning <${BUSINESS_EMAIL}>`;
+const PUBLIC_FILES = new Set([
+  '/index.html', '/login.html', '/robots.txt', '/sitemap.xml',
+  '/google3cf418453ff29223.html', '/img/logoImg.png', '/img/bgOne.png',
+]);
 
-verifyTransporter();
-
-function safeJoin(base, target) {
-  const targetPath = '.' + path.normalize('/' + target);
-  return path.join(base, targetPath);
-}
-
-function getMimeType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  const map = {
-    '.html': 'text/html; charset=utf-8',
-    '.css': 'text/css',
-    '.js': 'application/javascript',
-    '.json': 'application/json',
-    '.xml': 'application/xml; charset=utf-8',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.txt': 'text/plain',
+function securityHeaders(extra = {}) {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    ...extra,
   };
-  return map[ext] || 'application/octet-stream';
 }
 
-function readBody(req) {
+function sendJSON(res, status, body, extra = {}) {
+  res.writeHead(status, securityHeaders({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    ...extra,
+  }));
+  res.end(JSON.stringify(body));
+}
+
+function readJSON(req) {
   return new Promise((resolve, reject) => {
     let body = '';
+    let size = 0;
     req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        const error = new Error('Request body is too large');
+        error.status = 413;
+        reject(error);
+        req.destroy();
+        return;
+      }
       body += chunk;
     });
-    req.on('end', () => resolve(body));
+    req.on('end', () => {
+      try { resolve(JSON.parse(body || '{}')); }
+      catch { const error = new Error('Invalid JSON'); error.status = 400; reject(error); }
+    });
     req.on('error', reject);
   });
 }
 
-function parseCookies(req) {
-  const list = {};
-  const rc = req.headers.cookie;
-  if (rc) {
-    rc.split(';').forEach((cookie) => {
-      const parts = cookie.split('=');
-      list[parts.shift().trim()] = decodeURI(parts.join('='));
-    });
-  }
-  return list;
+function clientIp(req) {
+  return req.socket.remoteAddress || 'unknown';
 }
 
-function isAuthenticated(req) {
-  const cookies = parseCookies(req);
-  return cookies.admin_session === ADMIN_PASSWORD;
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try { return new URL(origin).host === req.headers.host; }
+  catch { return false; }
 }
 
-function readSubmissions() {
-  try {
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
-  } catch (err) {
-    return [];
-  }
+function cleanString(value, max, required = false) {
+  if (typeof value !== 'string') return required ? null : '';
+  const cleaned = value.trim();
+  if ((required && !cleaned) || cleaned.length > max) return null;
+  return cleaned;
 }
 
-function writeSubmissions(list) {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to write submissions', err);
-  }
+function validateQuote(body) {
+  const quote = {
+    name: cleanString(body.name, 120, true),
+    phone: cleanString(body.phone, 40, true),
+    email: cleanString(body.email, 254),
+    service: cleanString(body.service, 120, true),
+    address: cleanString(body.address, 500, true),
+    details: cleanString(body.details, 5000),
+  };
+  if (Object.values(quote).some((value) => value === null)) return null;
+  if (quote.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(quote.email)) return null;
+  return quote;
 }
 
-function sendJSON(res, code, data) {
-  res.writeHead(code, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'X-Robots-Tag': 'noindex, nofollow, noarchive',
-  });
-  res.end(JSON.stringify(data));
+function rateLimited(ip) {
+  const now = Date.now();
+  const attempts = (loginAttempts.get(ip) || []).filter((time) => now - time < LOGIN_WINDOW_MS);
+  loginAttempts.set(ip, attempts);
+  return attempts.length >= LOGIN_MAX_ATTEMPTS;
 }
 
-function sendFile(res, filePath, extraHeaders = {}) {
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404, {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'X-Robots-Tag': 'noindex, nofollow, noarchive',
-      });
-      res.end('404: Not found');
-      return;
-    }
+function recordFailedLogin(ip) {
+  const attempts = loginAttempts.get(ip) || [];
+  attempts.push(Date.now());
+  loginAttempts.set(ip, attempts);
+}
 
-    res.writeHead(200, { 'Content-Type': getMimeType(filePath), ...extraHeaders });
+function mimeType(filePath) {
+  return ({ '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.xml': 'application/xml; charset=utf-8', '.txt': 'text/plain; charset=utf-8' })[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+function sendFile(res, filePath, noIndex = false) {
+  fs.readFile(filePath, (error, data) => {
+    if (error) return sendJSON(res, 404, { error: 'Not found' });
+    res.writeHead(200, securityHeaders({
+      'Content-Type': mimeType(filePath),
+      ...(noIndex ? { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive' } : {}),
+    }));
     res.end(data);
   });
 }
 
+function sendHTML(res, html) {
+  res.writeHead(200, securityHeaders({ 'Content-Type': 'text/html; charset=utf-8' }));
+  res.end(html);
+}
+
+async function requireAdmin(req, res) {
+  const session = await authenticate(req);
+  if (!session) sendJSON(res, 401, { success: false, error: 'Unauthorized' });
+  return session;
+}
+
 const server = http.createServer(async (req, res) => {
-  let url;
   try {
-    url = new URL(req.url, 'http://localhost');
-  } catch (err) {
-    res.writeHead(400, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Robots-Tag': 'noindex, nofollow, noarchive',
-    });
-    res.end('400: Bad request');
-    return;
-  }
-  const noIndexHeader = { 'X-Robots-Tag': 'noindex, nofollow, noarchive' };
+    const url = new URL(req.url, 'http://localhost');
 
-  // Public API
-  if (url.pathname === '/api/quote' && req.method === 'POST') {
-    try {
-      const bodyRaw = await readBody(req);
-      const payload = JSON.parse(bodyRaw || '{}');
-
-      const submissions = readSubmissions();
-      const newSubmission = {
-        id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9),
-        receivedAt: new Date().toISOString(),
-        ip: req.socket.remoteAddress,
-        status: 'unread',
-        ...payload,
-      };
-      submissions.unshift(newSubmission);
-      writeSubmissions(submissions);
-
-      sendJSON(res, 200, { success: true });
-    } catch (err) {
-      sendJSON(res, 500, { success: false, error: String(err) });
+    if (req.method === 'POST' && !sameOrigin(req)) {
+      return sendJSON(res, 403, { success: false, error: 'Invalid request origin' });
     }
-    return;
-  }
 
-  // Auth API
-  if (url.pathname === '/api/login' && req.method === 'POST') {
-    try {
-      const bodyRaw = await readBody(req);
-      const payload = JSON.parse(bodyRaw || '{}');
-      if (payload.password === ADMIN_PASSWORD) {
-        res.writeHead(200, {
-          'Set-Cookie': `admin_session=${ADMIN_PASSWORD}; Path=/; HttpOnly; Max-Age=2592000`,
-          'Content-Type': 'application/json',
-        });
-        res.end(JSON.stringify({ success: true }));
-      } else {
-        sendJSON(res, 401, { success: false, error: 'Invalid password' });
+    if (url.pathname === '/api/quote' && req.method === 'POST') {
+      const quote = validateQuote(await readJSON(req));
+      if (!quote) return sendJSON(res, 400, { success: false, error: 'Invalid submission data' });
+      const id = crypto.randomUUID();
+      await pool.execute(
+        `INSERT INTO submissions (id, name, phone, email, service, address, details, ip_address)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, quote.name, quote.phone, quote.email || null, quote.service, quote.address, quote.details || null, clientIp(req)]
+      );
+      return sendJSON(res, 201, { success: true, id });
+    }
+
+    if (url.pathname === '/api/login' && req.method === 'POST') {
+      const ip = clientIp(req);
+      if (rateLimited(ip)) return sendJSON(res, 429, { success: false, error: 'Too many login attempts. Try again later.' });
+      const { password } = await readJSON(req);
+      if (!verifyPassword(password)) {
+        recordFailedLogin(ip);
+        return sendJSON(res, 401, { success: false, error: 'Invalid credentials' });
       }
-    } catch (err) {
-      sendJSON(res, 500, { success: false, error: String(err) });
-    }
-    return;
-  }
-
-  // Protected APIs
-  if (url.pathname.startsWith('/api/submissions')) {
-    if (!isAuthenticated(req)) {
-      sendJSON(res, 401, { success: false, error: 'Unauthorized' });
-      return;
+      loginAttempts.delete(ip);
+      const token = await createSession(ip, req.headers['user-agent']);
+      const cookie = `admin_token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${IS_PRODUCTION ? '; Secure' : ''}`;
+      return sendJSON(res, 200, { success: true }, { 'Set-Cookie': cookie });
     }
 
-    if (url.pathname === '/api/submissions' && req.method === 'GET') {
-      const submissions = readSubmissions();
-      sendJSON(res, 200, submissions);
-      return;
+    if (url.pathname === '/api/logout' && req.method === 'POST') {
+      await revokeSession(req);
+      return sendJSON(res, 200, { success: true }, {
+        'Set-Cookie': `admin_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${IS_PRODUCTION ? '; Secure' : ''}`,
+      });
     }
 
-    if (url.pathname === '/api/submissions/toggle' && req.method === 'POST') {
-      try {
-        const bodyRaw = await readBody(req);
-        const { id } = JSON.parse(bodyRaw || '{}');
-        const submissions = readSubmissions();
-        const index = submissions.findIndex((s) => s.id === id);
-        if (index !== -1) {
-          submissions[index].status = submissions[index].status === 'read' ? 'unread' : 'read';
-          writeSubmissions(submissions);
-          sendJSON(res, 200, { success: true, status: submissions[index].status });
-        } else {
-          sendJSON(res, 404, { success: false, error: 'Not found' });
-        }
-      } catch (err) {
-        sendJSON(res, 500, { success: false, error: String(err) });
+    if (url.pathname.startsWith('/api/submissions')) {
+      if (!await requireAdmin(req, res)) return;
+
+      if (url.pathname === '/api/submissions' && req.method === 'GET') {
+        const [rows] = await pool.execute(
+          `SELECT id, received_at AS receivedAt, status, name, phone, email, service, address, details
+           FROM submissions ORDER BY received_at DESC LIMIT 1000`
+        );
+        return sendJSON(res, 200, rows);
       }
-      return;
+
+      if (url.pathname === '/api/submissions/toggle' && req.method === 'POST') {
+        const { id } = await readJSON(req);
+        if (typeof id !== 'string') return sendJSON(res, 400, { success: false, error: 'Invalid id' });
+        const [result] = await pool.execute(
+          `UPDATE submissions SET status = IF(status = 'read', 'unread', 'read') WHERE id = ?`, [id]
+        );
+        if (!result.affectedRows) return sendJSON(res, 404, { success: false, error: 'Not found' });
+        const [[row]] = await pool.execute('SELECT status FROM submissions WHERE id = ?', [id]);
+        return sendJSON(res, 200, { success: true, status: row.status });
+      }
+
+      if (url.pathname === '/api/submissions' && req.method === 'DELETE') {
+        await pool.execute('DELETE FROM submissions');
+        return sendJSON(res, 200, { success: true });
+      }
+      return sendJSON(res, 405, { error: 'Method not allowed' }, { Allow: 'GET, POST, DELETE' });
     }
 
-    if (url.pathname === '/api/submissions' && req.method === 'DELETE') {
-      writeSubmissions([]);
-      sendJSON(res, 200, { success: true });
-      return;
-    }
-  }
-
-  // Serve static files
-  if (url.pathname === '/index.html') {
-    res.writeHead(301, { Location: '/' });
-    res.end();
-    return;
-  }
-
-  let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-  filePath = safeJoin(PUBLIC_DIR, filePath);
-
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Robots-Tag': 'noindex, nofollow, noarchive',
-    });
-    res.end('403: Forbidden');
-    return;
-  }
-
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    const isNoIndex =
-      url.pathname === '/submissions.html' ||
-      url.pathname === '/submissions.json' ||
-      url.pathname.startsWith('/api/');
-    
-    // Redirect to login if trying to access submissions.html and not authenticated
-    if (url.pathname === '/submissions.html' && !isAuthenticated(req)) {
-      res.writeHead(302, { Location: '/login.html' });
-      res.end();
-      return;
+    if (url.pathname === '/submissions.html') {
+      if (!await authenticate(req)) {
+        res.writeHead(302, securityHeaders({ Location: '/login.html', 'Cache-Control': 'no-store' }));
+        return res.end();
+      }
+      return sendFile(res, path.join(PUBLIC_DIR, 'submissions.html'), true);
     }
 
-    sendFile(res, filePath, isNoIndex ? noIndexHeader : {});
-  } else {
-    res.writeHead(404, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Robots-Tag': 'noindex, nofollow, noarchive',
-    });
-    res.end('404: Not found');
+    if (req.method === 'GET') {
+      const seoPage = renderSeoPage(url.pathname);
+      if (seoPage) return sendHTML(res, seoPage);
+      if (!url.pathname.endsWith('/') && seoPathSet.has(`${url.pathname}/`)) {
+        res.writeHead(301, securityHeaders({ Location: `${url.pathname}/${url.search}` }));
+        return res.end();
+      }
+    }
+
+    const publicPath = url.pathname === '/' ? '/index.html' : url.pathname;
+    if (!PUBLIC_FILES.has(publicPath)) return sendJSON(res, 404, { error: 'Not found' });
+    return sendFile(res, path.join(PUBLIC_DIR, publicPath.slice(1)), publicPath === '/login.html');
+  } catch (error) {
+    console.error(error);
+    if (!res.headersSent) sendJSON(res, error.status || 500, { success: false, error: error.status ? error.message : 'Internal server error' });
   }
 });
 
+async function start() {
+  await initializeDatabase();
+  server.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+}
 
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+start().catch((error) => {
+  console.error('Failed to start server:', error.message);
+  process.exit(1);
 });
+
+module.exports = { server, validateQuote };

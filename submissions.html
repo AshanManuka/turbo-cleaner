@@ -143,6 +143,15 @@
     const clearBtn = document.getElementById('clearBtn');
     const logoutBtn = document.getElementById('logoutBtn');
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
     async function toggleStatus(id) {
       try {
         const res = await fetch('/api/submissions/toggle', {
@@ -178,19 +187,19 @@
 
         const rows = data
           .map((item) => {
-            const receivedAt = item.receivedAt || '';
-            const name = item.name || '';
-            const phone = item.phone || '';
-            const email = item.email || '';
-            const service = item.service || '';
-            const address = item.address || '';
-            const details = item.details || '';
-            const status = item.status || 'unread';
-            const id = item.id;
+            const receivedAt = escapeHtml(new Date(item.receivedAt || '').toLocaleString());
+            const name = escapeHtml(item.name);
+            const phone = escapeHtml(item.phone);
+            const email = escapeHtml(item.email);
+            const service = escapeHtml(item.service);
+            const address = escapeHtml(item.address);
+            const details = escapeHtml(item.details);
+            const status = item.status === 'read' ? 'read' : 'unread';
+            const id = escapeHtml(item.id);
 
             return `
               <tr class="${status}">
-                <td>${new Date(receivedAt).toLocaleString()}</td>
+                <td>${receivedAt}</td>
                 <td>
                   <span class="status-badge status-${status}">${status}</span>
                 </td>
@@ -251,9 +260,12 @@
 
     refreshBtn.addEventListener('click', loadSubmissions);
     clearBtn.addEventListener('click', clearAll);
-    logoutBtn.addEventListener('click', () => {
-      document.cookie = 'admin_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-      window.location.href = '/login.html';
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } finally {
+        window.location.href = '/login.html';
+      }
     });
 
     loadSubmissions();
